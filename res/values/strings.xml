@@ -1,0 +1,8 @@
+<resources>
+    <string name="name">ComputerVision</string>
+    <string name="ok">OK</string>
+    <string name="camera_required_title">Camera Required</string>
+    <string name="camera_required_message">Please enable Camera permission for ComputerVision to access camera feed.</string>
+    <string name="accessibility_required_title">Accessibility Required</string>
+    <string name="accessibility_required_message">Please enable Accessibility permission for ComputerVision to draw the detections overlay.</string>
+</resources>
