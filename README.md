@@ -7,9 +7,9 @@
 
 ## 📋 General instructions
 
-- [About](#about)
-- [Requirements](#requirements)
-- [Usage](#usage)
+- [About](#-about)
+- [Requirements](#-requirements)
+- [Usage](#-usage)
 
 ## 🔍 About
 
@@ -33,10 +33,10 @@ It is also possible to use the front camera with the floating switch button at t
 
 # 📋 Tasks
 
-- [Object Detection](#object-detection)
-- [Keypoint Detection](#keypoint-detection)
-- [Instance Segmentation](#instance-segmentation)
-- [Private Project](#private-project)
+- [Object Detection](#-object-detection)
+- [Keypoint Detection](#-keypoint-detection)
+- [Instance Segmentation](#-instance-segmentation)
+- [Private Project](#-private-project)
 
 ## ☐ Object Detection
 
@@ -88,7 +88,7 @@ TODO
     <img src="connect4.gif">
 </p>
 
-On top of what's mentioned in [About](#about), the project features:
+On top of what's mentioned in [About](#-about), the project features:
 - networking c++ integration with [mongoose](https://github.com/cesanta/mongoose)
 - which handles both Supabase and discord webhook POST on https with TLS and parsing
 - aes c++ encryption with [tiny aes](https://github.com/kokke/tiny-AES-c) and other code obfuscation techniques (hash check, compilation flags, proguard...)
