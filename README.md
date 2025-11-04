@@ -79,7 +79,7 @@ The result is then carried back to Kotlin where rectangles are drawn with separa
 ## 🖐 Keypoint Detection
 
 <p align="center">
-    <img src="KeyPointDetection.gif">
+    <img src="KeypointDetection.gif">
 </p>
 
 ### The context
