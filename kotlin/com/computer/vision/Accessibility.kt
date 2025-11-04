@@ -13,7 +13,6 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Build
 import android.util.DisplayMetrics
-import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -28,8 +27,8 @@ class Accessibility : AccessibilityService() {
     private lateinit var detectionsView: DetectionsView
 
     /// DetectionsView
-    class DetectionsView(context: Context) : View(context) {
-        val detections: MutableList<IntArray> = ArrayList()
+    inner class DetectionsView(context: Context) : View(context) {
+        val detections: MutableList<FloatArray> = ArrayList()
         private val cheatClassColorMap: MutableMap<String, Int> = HashMap()
         private val colors = intArrayOf(
             Color.RED,
@@ -61,6 +60,11 @@ class Accessibility : AccessibilityService() {
             2 to "dirt",
             3 to "enderman"
         )
+        private val keypointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.MAGENTA
+        }
+        private val keypointRadius = 8f
 
         @SuppressLint("DrawAllocation")
         override fun onDraw(canvas: Canvas) {
@@ -68,12 +72,12 @@ class Accessibility : AccessibilityService() {
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             synchronized(detections) {
                 for (detection in detections) {
-                    if (detection.size >= 5) {
-                        val classId = detection[0]
-                        val x = detection[1].toFloat()
-                        val y = detection[2].toFloat()
-                        val width = detection[3].toFloat()
-                        val height = detection[4].toFloat()
+                    if (app.currentID == 1) {
+                        val classId = detection[0].toInt()
+                        val x = detection[1]
+                        val y = detection[2]
+                        val width = detection[3]
+                        val height = detection[4]
                         val color = cheatClassColorMap.getOrPut("$classId") {
                             colors[colorIndex.getAndIncrement() % colors.size]
                         }
@@ -105,6 +109,15 @@ class Accessibility : AccessibilityService() {
                             labelY + textHeight - 8f,
                             labelTextPaint
                         )
+                    } else if (app.currentID == 2) {
+                        for (i in detection.indices step 2) {
+                            canvas.drawCircle(
+                                detection[i],
+                                detection[i + 1],
+                                keypointRadius,
+                                keypointPaint
+                            )
+                        }
                     }
                 }
             }
@@ -147,7 +160,7 @@ class Accessibility : AccessibilityService() {
         windowManager.addView(detectionsView, params)
     }
 
-    fun drawDetections(detections: Array<IntArray>) {
+    fun drawDetections(detections: Array<FloatArray>) {
         detectionsView.detections.clear()
         synchronized(detectionsView.detections) {
             for (detection in detections) {

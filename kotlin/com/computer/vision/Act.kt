@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,12 +44,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.lifecycle.LifecycleOwner
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
@@ -127,7 +126,7 @@ class Act : ComponentActivity() {
         setContent {
             CameraApp()
         }
-        app.load(0, app.assets)
+        app.load(app.currentID, app.assets)
     }
 
     @SuppressLint("RestrictedApi")
@@ -141,12 +140,54 @@ class Act : ComponentActivity() {
         app.coroutineDefault.launch {
             isProcessing.set(true)
             try {
+                if (app.currentID < 0) {
+                    app.currentID = -app.currentID
+                    app.load(app.currentID, assets)
+                }
                 val buffer = imageProxy.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
 //                download(bytes, imageProxy.width, imageProxy.height)
-                val detections = app.objectDetection(bytes, imageProxy.width)
-                app.accessibility.get()?.drawDetections(resize(imageProxy, previewView, detections))
+                val detections = app.run(bytes, imageProxy.width).let { det ->
+                    when (app.currentID) {
+                        1 -> { // Object detection
+                            val scaleX = previewView.width.toFloat() / imageProxy.height
+                            val scaleY = previewView.height.toFloat() / imageProxy.width
+                            Array(det.size) { i ->
+                                val d = det[i]
+                                val label = d[0] - 1
+                                // Convert normalized to pixels
+                                val x = d[2] * imageProxy.width
+                                val y = d[3] * imageProxy.height
+                                val w = d[4] * imageProxy.width - x
+                                val h = d[5] * imageProxy.height - y
+                                // Apply rotation + scaling
+                                val rx = (imageProxy.height - y - h) * scaleX
+                                val sy = x * scaleY
+                                val rw = h * scaleX
+                                val sh = w * scaleY
+                                floatArrayOf(label, rx, sy, rw, sh)
+                            }
+                        }
+
+                        2 -> { // Keypoint detection
+                            val first = det[0]
+                            Log.d(
+                                "KeypointDetection",
+                                "First detection -> ${first.size} ${first.joinToString(", ") { it.toString() }}"
+                            )
+                            arrayOf(first)
+                        }
+
+                        3 -> { // Instance segmentation
+                            det
+                        }
+
+                        else -> det
+                    }
+                }
+
+                app.accessibility.get()?.drawDetections(detections)
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -156,30 +197,11 @@ class Act : ComponentActivity() {
         }
     }
 
-    private suspend fun resize(
-        imageProxy: ImageProxy, previewView: PreviewView, detections: Array<IntArray>
-    ): Array<IntArray> = withContext(Dispatchers.Main) {
-        val sourceHeight = imageProxy.height.toFloat()
-        Array(detections.size) { i ->
-            val detection = detections[i]
-            val scaleX = previewView.width.toFloat() / sourceHeight
-            val scaleY = previewView.height.toFloat() / imageProxy.width.toFloat()
-            intArrayOf(
-                detection[0], // classId
-                ((sourceHeight - detection[2] - detection[4]) * scaleX).toInt(), // rotated and scaled x
-                (detection[1] * scaleY).toInt(), // scaled y
-                (detection[4] * scaleX).toInt(), // scaled height
-                (detection[3] * scaleY).toInt()  // scaled width
-            )
-        }
-    }
-
     private fun download(bytes: ByteArray, width: Int, height: Int) {
         try {
             val bitmap = createBitmap(width, height)
             bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(bytes))
-            val file =
-                File(getExternalFilesDir(null), "${System.currentTimeMillis()}.png")
+            val file = File(getExternalFilesDir(null), "${System.currentTimeMillis()}.png")
             FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
@@ -211,21 +233,27 @@ class Act : ComponentActivity() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Button(
-                    onClick = { }, modifier = Modifier
+                    onClick = {
+                        app.currentID = -1
+                    }, modifier = Modifier
                         .weight(1f)
                         .padding(2.dp)
                 ) {
                     Text("Object detection")
                 }
                 Button(
-                    onClick = { }, modifier = Modifier
+                    onClick = {
+                        app.currentID = -2
+                    }, modifier = Modifier
                         .weight(1f)
                         .padding(2.dp)
                 ) {
                     Text("Keypoint detection")
                 }
                 Button(
-                    onClick = { }, modifier = Modifier
+                    onClick = {
+                        app.currentID = -3
+                    }, modifier = Modifier
                         .weight(1f)
                         .padding(2.dp)
                 ) {

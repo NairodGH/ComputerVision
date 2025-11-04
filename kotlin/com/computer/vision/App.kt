@@ -14,8 +14,9 @@ class App : Application() {
     var coroutineMain = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     var coroutineDefault = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val accessibilityRunning: AtomicBoolean by lazy { AtomicBoolean(false) }
-    external fun load(id: Byte, assetManager: AssetManager)
-    external fun objectDetection(image: ByteArray, width: Int): Array<IntArray>
+    var currentID = 1
+    external fun load(id: Int, assetManager: AssetManager)
+    external fun run(image: ByteArray, width: Int): Array<FloatArray>
 
     override fun onCreate() {
         super.onCreate()

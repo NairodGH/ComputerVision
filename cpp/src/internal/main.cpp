@@ -1,12 +1,16 @@
 #include "main.h"
 
-Net *network;
+Net *network = nullptr;
 
 /// load
 extern "C" JNIEXPORT void JNICALL
-Java_com_computer_vision_App_load(JNIEnv *env, jobject, jbyte ID, jobject jAssetManager) {
+Java_com_computer_vision_App_load(JNIEnv *env, jobject, jint id, jobject jAssetManager) {
     AAssetManager *assetManager = AAssetManager_fromJava(env, jAssetManager);
     const auto has_gpu = get_gpu_count() > 0;
+    if (network != nullptr) {
+        delete network;
+        network = nullptr;
+    }
     network = new Net();
     network->opt.num_threads = get_cpu_count();
     network->opt.use_vulkan_compute = has_gpu;
@@ -32,7 +36,7 @@ Java_com_computer_vision_App_load(JNIEnv *env, jobject, jbyte ID, jobject jAsset
     network->opt.use_fp16_packed = false; //get_gpu_info().support_fp16_packed();
     network->opt.use_fp16_storage = false; //get_gpu_info().support_fp16_storage();
     network->opt.use_fp16_arithmetic = false; //get_gpu_info().support_fp16_arithmetic();
-//    network->opt.use_int8_inference = true;
+    //    network->opt.use_int8_inference = true;
     if (has_gpu) {
         network->opt.use_shader_pack8 = true;
         network->opt.use_shader_local_memory = true;
@@ -53,13 +57,13 @@ Java_com_computer_vision_App_load(JNIEnv *env, jobject, jbyte ID, jobject jAsset
         }
     }
     // in the .param, make sure to set the confidence threshold (2=) and nms threshold (3=) as scientific values after Yolov3DetectionOutput
-    network->load_param(assetManager, (to_string(ID) + ".param").c_str());
-    network->load_model(assetManager, (to_string(ID) + ".bin").c_str());
+    network->load_param(assetManager, (to_string(id) + ".param").c_str());
+    network->load_model(assetManager, (to_string(id) + ".bin").c_str());
 }
 
 /// run
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_computer_vision_App_objectDetection(JNIEnv *env, jobject, jbyteArray image, jint imageWidth) {
+Java_com_computer_vision_App_run(JNIEnv *env, jobject, jbyteArray image, jint imageWidth) {
     jint imageHeight = env->GetArrayLength(image) / (imageWidth * 4);
     jbyte *data = env->GetByteArrayElements(image, nullptr);
     Mat in = Mat::from_pixels_resize((const uint8_t *) data,
@@ -74,26 +78,15 @@ Java_com_computer_vision_App_objectDetection(JNIEnv *env, jobject, jbyteArray im
     ex.input("data", in);
     Mat out;
     ex.extract("output", out);
-    jobjectArray detectionsArray = env->NewObjectArray(out.h, env->FindClass("[I"), nullptr);
+    jobjectArray detectionsArray = env->NewObjectArray(out.h, env->FindClass("[F"), nullptr);
     // 0=class+1, 1=score, 2=xmin, 3=ymin, 4=xmax, 5=ymax
     // coords are normalized so multiply by image size for pixel coords
     for (int i = 0; i < out.h; i++) {
-        const float label = out.row(i)[0] - 1;
-        float x = out.row(i)[2] * float(imageWidth);
-        float y = out.row(i)[3] * float(imageHeight);
-        float width = out.row(i)[4] * float(imageWidth) - x;
-        float height = out.row(i)[5] * float(imageHeight) - y;
-        jintArray detection = env->NewIntArray(5);
-        jint values[5] = {
-            (jint) label,
-            (jint) x,
-            (jint) y,
-            (jint) width,
-            (jint) height
-        };
-        env->SetIntArrayRegion(detection, 0, 5, values);
-        env->SetObjectArrayElement(detectionsArray, i, detection);
-        env->DeleteLocalRef(detection);
+        const float *row = out.row(i);
+        jfloatArray rowArray = env->NewFloatArray(out.w);
+        env->SetFloatArrayRegion(rowArray, 0, out.w, row);
+        env->SetObjectArrayElement(detectionsArray, i, rowArray);
+        env->DeleteLocalRef(rowArray);
     }
     env->ReleaseByteArrayElements(image, data, 0);
     return detectionsArray;
