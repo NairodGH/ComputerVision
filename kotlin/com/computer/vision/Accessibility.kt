@@ -13,6 +13,7 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Build
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -44,6 +45,7 @@ class Accessibility : AccessibilityService() {
         private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 5f
+            color = Color.RED
         }
         private val labelBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
@@ -62,7 +64,7 @@ class Accessibility : AccessibilityService() {
         )
         private val keypointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = Color.MAGENTA
+            color = Color.RED
         }
         private val keypointRadius = 8f
 

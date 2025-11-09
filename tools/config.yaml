@@ -1,0 +1,12 @@
+# Data
+path: .
+train: images/train  # train images (relative to 'path')
+val: images/val  # val images (relative to 'path')
+
+# Keypoints
+kpt_shape: [8, 2]  # [number of keypoints, number of dim aka coords (without visible flag)]
+flip_idx: [3, 0, 2, 1, 7, 4, 6, 5] # near shoulder 0, near hip 1, far hip 2, far shoulder 3, near hand 4, near foot 5, far foot 6, far hand 7
+
+# Classes
+names:
+  0: enderman

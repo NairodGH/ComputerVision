@@ -8,7 +8,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.provider.Settings
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -148,46 +147,13 @@ class Act : ComponentActivity() {
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
 //                download(bytes, imageProxy.width, imageProxy.height)
-                val detections = app.run(bytes, imageProxy.width).let { det ->
-                    when (app.currentID) {
-                        1 -> { // Object detection
-                            val scaleX = previewView.width.toFloat() / imageProxy.height
-                            val scaleY = previewView.height.toFloat() / imageProxy.width
-                            Array(det.size) { i ->
-                                val d = det[i]
-                                val label = d[0] - 1
-                                // Convert normalized to pixels
-                                val x = d[2] * imageProxy.width
-                                val y = d[3] * imageProxy.height
-                                val w = d[4] * imageProxy.width - x
-                                val h = d[5] * imageProxy.height - y
-                                // Apply rotation + scaling
-                                val rx = (imageProxy.height - y - h) * scaleX
-                                val sy = x * scaleY
-                                val rw = h * scaleX
-                                val sh = w * scaleY
-                                floatArrayOf(label, rx, sy, rw, sh)
-                            }
-                        }
-
-                        2 -> { // Keypoint detection
-                            val first = det[0]
-                            Log.d(
-                                "KeypointDetection",
-                                "First detection -> ${first.size} ${first.joinToString(", ") { it.toString() }}"
-                            )
-                            arrayOf(first)
-                        }
-
-                        3 -> { // Instance segmentation
-                            det
-                        }
-
-                        else -> det
-                    }
-                }
-
-                app.accessibility.get()?.drawDetections(detections)
+                app.accessibility.get()?.drawDetections(
+                    app.run(
+                        bytes, intArrayOf(
+                            app.currentID, previewView.width, previewView.height
+                        )
+                    )
+                )
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -217,11 +183,11 @@ class Act : ComponentActivity() {
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
                 factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    previewView
-                }, update = { previewView ->
-                    setupCamera(previewView, isBackCamera.value)
-                }, modifier = Modifier.fillMaxSize()
+                val previewView = PreviewView(ctx)
+                previewView
+            }, update = { previewView ->
+                setupCamera(previewView, isBackCamera.value)
+            }, modifier = Modifier.fillMaxSize()
             )
             Row(
                 modifier = Modifier

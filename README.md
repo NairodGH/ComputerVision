@@ -98,6 +98,8 @@ I therefore chose to follow this [great tutorial](https://www.youtube.com/watch?
 - training then validating the model,
 - exporting it to ncnn's bin and param.
 
+You can find in /tools the config file and python scripts I used/made during this process.
+
 The next step was to make it work with my android application's JNI NCNN, which it supports, but unlike object detection doesn't simply output the highest confidence bounding box with the associated class.\
 Instead it returns the raw feature tensor from the model’s last layer, which represents dense predictions for every grid cell across all FPN (Feature Pyramid Network) levels:
 | Level | Stride | Feature Map Size (640×640 input divided by stride) | Detects        |
@@ -126,6 +128,7 @@ Just like for object detection, we then draw them back in Kotlin as an overlay, 
 
 - Even though I knew I would have to handle switching models gracefully (making sure there isn't an ongoing inference as we unload it) between tasks, I started with a hardcoded way for object detection (but implementing that part turned out not to be that hard).
 - There may have been an easier alternative framework for keypoint annotation/training/inference, but in retrospect I think it's good to handle everything at the lowest level so you truly understand what you're doing.
+- Annotating keypoints requires to do it in the same order on every frame since it goes as far as detecting which points are right or left (as we also need to specify what indices get swapped during flipping), mine was [near shoulder 0, near hip 1, far hip 2, far shoulder 3, near hand 4, near foot 5, far foot 6, far hand 7] and I'm not sure I always got the near/far right but considering both sides of the enderman look the same and I still followed the order it should be fine.
 
 ## 🧩 Instance Segmentation
 

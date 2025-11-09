@@ -16,7 +16,7 @@ class App : Application() {
     val accessibilityRunning: AtomicBoolean by lazy { AtomicBoolean(false) }
     var currentID = 1
     external fun load(id: Int, assetManager: AssetManager)
-    external fun run(image: ByteArray, width: Int): Array<FloatArray>
+    external fun run(image: ByteArray, params: IntArray): Array<FloatArray>
 
     override fun onCreate() {
         super.onCreate()

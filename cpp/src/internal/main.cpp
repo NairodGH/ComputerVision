@@ -63,31 +63,104 @@ Java_com_computer_vision_App_load(JNIEnv *env, jobject, jint id, jobject jAssetM
 
 /// run
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_computer_vision_App_run(JNIEnv *env, jobject, jbyteArray image, jint imageWidth) {
-    jint imageHeight = env->GetArrayLength(image) / (imageWidth * 4);
-    jbyte *data = env->GetByteArrayElements(image, nullptr);
-    Mat in = Mat::from_pixels_resize((const uint8_t *) data,
-                                     Mat::PIXEL_RGBA2RGB,
-                                     imageWidth, imageHeight,
-                                     512, 288);
+Java_com_computer_vision_App_run(JNIEnv *env, jobject, jbyteArray jBytes, jintArray jParams) {
+    jbyte *bytes = env->GetByteArrayElements(jBytes, nullptr);
+    jint *params = env->GetIntArrayElements(jParams, nullptr);
+
+    //letterbox 640x480 camera feed to 640x640 images like the ones the model was trained on (to avoid stretching)
+    Mat original = Mat::from_pixels((const uint8_t *) bytes, Mat::PIXEL_RGBA2RGB, 640, 480);
+    int pad = (640 - 480) / 2;
+    Mat letterboxed(640, 640, 3);
+    letterboxed.fill(114.f);
+    for (int c = 0; c < 3; c++) {
+        for (int y = 0; y < 480; y++) {
+            float *dst_ptr = letterboxed.channel(c).row(y + pad);
+            const float *src_ptr = original.channel(c).row(y);
+            memcpy(dst_ptr, src_ptr, 640 * sizeof(float));
+        }
+    }
+
     // those are told by darknet2ncnn
     const float means[3] = {0, 0, 0};
     const float norms[3] = {1 / 255.f, 1 / 255.f, 1 / 255.f};
-    in.substract_mean_normalize(means, norms);
+    letterboxed.substract_mean_normalize(means, norms);
     Extractor ex = network->create_extractor();
-    ex.input("data", in);
+    ex.input("data", letterboxed);
     Mat out;
     ex.extract("output", out);
+
     jobjectArray detectionsArray = env->NewObjectArray(out.h, env->FindClass("[F"), nullptr);
-    // 0=class+1, 1=score, 2=xmin, 3=ymin, 4=xmax, 5=ymax
-    // coords are normalized so multiply by image size for pixel coords
+    const float scaleX = (float) params[1] / 480.f;
+    const float scaleY = (float) params[2] / 640.f;
     for (int i = 0; i < out.h; i++) {
         const float *row = out.row(i);
-        jfloatArray rowArray = env->NewFloatArray(out.w);
-        env->SetFloatArrayRegion(rowArray, 0, out.w, row);
+        vector<float> processed(row, row + out.w);
+
+        if (params[0] == 1) { // Object detection, normalized to pixels, scale and rotate
+            float x = row[2] * 640.f;
+            float y = row[3] * 480.f;
+            float w = row[4] * 640.f - x;
+            float h = row[5] * 480.f - y;
+            float rx = (480.f - y - h) * scaleX;
+            float ry = x * scaleY;
+            float rw = h * scaleX;
+            float rh = w * scaleY;
+            processed = {row[0] - 1, rx, ry, rw, rh};
+        } else if (params[0] == 2) { // Keypoint detection, extract keypoints and rotate
+            if (i == 0) {
+                const int num_keypoints = 8;
+                const int num_levels = 3;
+                const float stride_list[3] = {8.f, 16.f, 32.f};
+                const int level_sizes[3] = {80, 40, 20};
+                const float conf_threshold = 0.7f;
+                float best_conf = 0.f;
+                float best_kps[num_keypoints * 2];
+                int pos = 0;
+                for (int s : level_sizes) {
+                    for (int gy = 0; gy < s; gy++) {
+                        for (int gx = 0; gx < s; gx++, pos++) {
+                            float conf = out.row(4)[pos];
+                            if (conf <= best_conf || conf < conf_threshold)
+                                continue;
+                            best_conf = conf;
+                            for (int k = 0; k < num_keypoints; k++) {
+                                best_kps[k * 2] = out.row(5 + k * 2)[pos];
+                                best_kps[k * 2 + 1] = out.row(6 + k * 2)[pos];
+                            }
+                        }
+                    }
+                }
+                if (best_conf > 0.f) {
+                    vector<float> keypoints;
+                    keypoints.reserve(num_keypoints * 2);
+
+                    for (int k = 0; k < num_keypoints; k++) {
+                        float px = best_kps[k * 2];
+                        float py = best_kps[k * 2 + 1] - pad;
+                        float rotated_x = (480.f - py) * scaleX;
+                        float rotated_y = px * scaleY;
+                        keypoints.push_back(rotated_x);
+                        keypoints.push_back(rotated_y);
+                    }
+                    processed = keypoints;
+                } else {
+                    processed.clear();
+                }
+            } else {
+                processed.clear();
+            }
+        } else if (params[0] == 3) { // Instance segmentation
+
+        }
+        jfloatArray rowArray = env->NewFloatArray((jsize) processed.size());
+        if (!processed.empty()) {
+            env->SetFloatArrayRegion(rowArray, 0, (jsize) processed.size(), processed.data());
+        }
         env->SetObjectArrayElement(detectionsArray, i, rowArray);
         env->DeleteLocalRef(rowArray);
     }
-    env->ReleaseByteArrayElements(image, data, 0);
+
+    env->ReleaseByteArrayElements(jBytes, bytes, 0);
+    env->ReleaseIntArrayElements(jParams, params, 0);
     return detectionsArray;
 }
