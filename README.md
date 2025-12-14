@@ -68,6 +68,8 @@ There isn't much to say technically as both projects are well maintained and mak
 Inference is executed in JNI (C++ on Android) with adaptable network options (based on GPU availability and phone performance) under a Dispatchers.Default coroutine (for CPU-intensive workloads).\
 The result is then carried back to Kotlin where rectangles are drawn with separate colors and their class name as an overlay over the camera output.
 
+You can find in /tools the config file and python scripts I used/made during processes.
+
 ### What I did wrong
 - The videos I took and added to my annotation are all over the place, I didn't really plan on how I should optimally take them so they range from me picking them up 1 by 1 to spinning around with the object.
 - This caused a lot of blur which is really annoying to annotate since even myself sometimes couldn't tell if I should "teach" my model to recognize a really blurry object (I knew what it was from context but the goal of my model is to recognize generalistic patterns).
@@ -98,8 +100,6 @@ I therefore chose to follow this [great tutorial](https://www.youtube.com/watch?
 - training then validating the model,
 - exporting it to ncnn's bin and param.
 
-You can find in /tools the config file and python scripts I used/made during this process.
-
 The next step was to make it work with my android application's JNI NCNN, which it supports, but unlike object detection doesn't simply output the highest confidence bounding box with the associated class.\
 Instead it returns the raw feature tensor from the model’s last layer, which represents dense predictions for every grid cell across all FPN (Feature Pyramid Network) levels:
 | Level | Stride | Feature Map Size (640×640 input divided by stride) | Detects        |
@@ -129,10 +129,52 @@ Just like for object detection, we then draw them back in Kotlin as an overlay, 
 - Even though I knew I would have to handle switching models gracefully (making sure there isn't an ongoing inference as we unload it) between tasks, I started with a hardcoded way for object detection (but implementing that part turned out not to be that hard).
 - There may have been an easier alternative framework for keypoint annotation/training/inference, but in retrospect I think it's good to handle everything at the lowest level so you truly understand what you're doing.
 - Annotating keypoints requires to do it in the same order on every frame since it goes as far as detecting which points are right or left (as we also need to specify what indices get swapped during flipping), mine was [near shoulder 0, near hip 1, far hip 2, far shoulder 3, near hand 4, near foot 5, far foot 6, far hand 7] and I'm not sure I always got the near/far right but considering both sides of the enderman look the same and I still followed the order it should be fine.
+- Since Ultralytics training requires a square input, I opted for a 640×640 letterboxed aspect ratio for my 640×480 phone-captured video frames to avoid quality loss from stretching. Because the annotations had already been completed, I implemented a script to apply the letterboxing and update all corresponding annotation coordinates accordingly.
 
 ## 🧩 Instance Segmentation
 
-TODO
+<p align="center">
+    <img src="SemanticSegmentation.gif">
+</p>
+
+### The context
+
+[Semantic segmentation](https://en.wikipedia.org/wiki/Image_segmentation#:~:text=%5Bedit%5D-,Semantic%20segmentation,-is%20an%20approach) is a task that involves assigning a class label to every pixel in an image, producing a mask that corresponds more closely to the shape of an object than a simple bounding box.\
+In this case, the object is the same 11.5x5x0.5cm diamond sword toy I used for object detection.\
+I initially considered using the Enderman toy, as with keypoint detection, but without its head the silhouette is already fairly rectangular and would not benefit much from segmentation compared to a sword-shaped object.\
+On top of the bounding box surrounding it (since semantic segmentation builds on object detection), the model was trained to recover the sword’s shape using 18 contour points.
+
+### The process
+
+As with keypoint detection, DarkSuite does not yet support segmentation, so I followed the same tutorial channel and based my implementation on [this great one](https://www.youtube.com/watch?v=aVKGjzAUHz0). The overall process is identical to [Keypoint Detection](#-keypoint-detection)'s, except that annotation in CVAT consists of defining a pixel-wise mask of the sword shape that yolov8-seg learns.
+
+Recovering the polygon points in my Android app via JNI + NCNN extraction was the most challenging part because, unlike the other tasks, the final *out* Concat layer alone is not sufficient. The model does not directly predict a full-resolution mask per detection; instead, it uses a prototype-based mask representation to keep inference fast and memory-efficient.\
+This final tensor contains per-anchor detection data, for each of the 8400 anchors (see why in [Keypoint Detection](#-keypoint-detection)'s process) it includes:
+- Bounding box parameters (x, y, w, h)
+- Objectness score
+- Class scores (if multi-class)
+- Mask coefficients (32 weights)
+
+It does not contain spatial mask data, hence why we need to extract another layer from the .param called *proto*.\
+The prototype layer is a [32, 160, 160] shared mask basis tensor, produced once per image, where:
+- 32 is the number of learned mask prototypes respectively corresponding to *out*'s 32 mask prototypes
+- 160×160 is the low-resolution spatial mask grid
+
+The choice of 32 prototypes and a 160 × 160 prototype resolution is an architectural trade-off chosen for the best quality–performance balance.\
+If the model predicted a full 160×160 mask per detection, it would require `8400 × 160 × 160 ≈ 215 million values per image` which is infeasible on real-time systems.\
+Instead, the model uses linear mask composition with $\mathbf{M}(x,y)=\sigma\!\left(\sum_{i=1}^{32} c_i\,P_i(x,y)\right)$ which reduces the output size to `8400 × 32 + 32 × 160 × 160 ≈ 1 million values per image`.
+
+Since the generated mask is global (160×160 for the entire image), only a small region corresponds to the object and the outside is mostly noise so I crop to remove false positives, improve edge extraction and match how the model was trained.\
+Segmentation gives a dense region, not geometry, so we then:
+- Sort boundary points into a continuous clockwise shape,
+- Reduce unordered edges to 18 of points,
+- Rescale and rotate them back to valid screen values into the returned array.
+
+Those points are then drawn in Kotlin as a transparent filled polygon over the sword.
+
+### What I did wrong-ish
+
+- The sword shape was annotated using 18 points, chosen to provide a visually reasonable approximation without excessive precision. However, the predicted mask is not constrained to this limited representation and can capture the sword’s contour with much higher fidelity, potentially involving hundreds of edge points. In practice, rendering all of these points on Android must also be considered, as drawing hundreds of short line segments for the polygon can impact performance.
 
 ## 🚫 Private Project
 

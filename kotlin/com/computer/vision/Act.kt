@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -223,7 +224,7 @@ class Act : ComponentActivity() {
                         .weight(1f)
                         .padding(2.dp)
                 ) {
-                    Text("Instance segmentation")
+                    Text("Semantic segmentation")
                 }
             }
             FloatingActionButton(

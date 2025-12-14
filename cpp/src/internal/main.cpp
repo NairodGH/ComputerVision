@@ -96,61 +96,163 @@ Java_com_computer_vision_App_run(JNIEnv *env, jobject, jbyteArray jBytes, jintAr
         const float *row = out.row(i);
         vector<float> processed(row, row + out.w);
 
-        if (params[0] == 1) { // Object detection, normalized to pixels, scale and rotate
+        if (params[0] == 1) { // Object detection
+            // Denormalize coordinates to 640x480 letterboxed image space
             float x = row[2] * 640.f;
             float y = row[3] * 480.f;
             float w = row[4] * 640.f - x;
             float h = row[5] * 480.f - y;
-            float rx = (480.f - y - h) * scaleX;
-            float ry = x * scaleY;
-            float rw = h * scaleX;
-            float rh = w * scaleY;
-            processed = {row[0] - 1, rx, ry, rw, rh};
-        } else if (params[0] == 2) { // Keypoint detection, extract keypoints and rotate
+            // Rotate 90° clockwise and scale to screen resolution
+            processed = {
+                row[0] - 1,
+                (480.f - y - h) * scaleX,
+                x * scaleY,
+                h * scaleX,
+                w * scaleY
+            };
+        } else if (params[0] == 2) { // Keypoint detection
             if (i == 0) {
-                const int num_keypoints = 8;
-                const int num_levels = 3;
-                const float stride_list[3] = {8.f, 16.f, 32.f};
-                const int level_sizes[3] = {80, 40, 20};
-                const float conf_threshold = 0.7f;
-                float best_conf = 0.f;
-                float best_kps[num_keypoints * 2];
+                const int nbKeypoints = 8;
+                float bestConfidence = 0.f;
+                float bestKeypoints[nbKeypoints * 2];
+                // Iterate through all grid cells in all FPN levels
+                // Total positions: 80*80 + 40*40 + 20*20 = 8400
                 int pos = 0;
-                for (int s : level_sizes) {
-                    for (int gy = 0; gy < s; gy++) {
-                        for (int gx = 0; gx < s; gx++, pos++) {
-                            float conf = out.row(4)[pos];
-                            if (conf <= best_conf || conf < conf_threshold)
-                                continue;
-                            best_conf = conf;
-                            for (int k = 0; k < num_keypoints; k++) {
-                                best_kps[k * 2] = out.row(5 + k * 2)[pos];
-                                best_kps[k * 2 + 1] = out.row(6 + k * 2)[pos];
+                for (int level: {80, 40, 20}) {
+                    for (int gridY = 0; gridY < level; gridY++) {
+                        for (int gridX = 0; gridX < level; gridX++, pos++) {
+                            float confidence = out.row(4)[pos];
+                            if (confidence <= bestConfidence || confidence < 0.7f)
+                                continue; // Skip if not better or too low
+                            bestConfidence = confidence;
+                            // Extract keypoint coordinates for this detection
+                            // Rows 5-20: x0,y0,x1,y1,...,x7,y7 (8 keypoints, 16 values)
+                            for (int j = 0; j < nbKeypoints; j++) {
+                                bestKeypoints[j * 2] = out.row(5 + j * 2)[pos];
+                                bestKeypoints[j * 2 + 1] = out.row(6 + j * 2)[pos];
                             }
                         }
                     }
                 }
-                if (best_conf > 0.f) {
+                if (bestConfidence > 0.f) {
                     vector<float> keypoints;
-                    keypoints.reserve(num_keypoints * 2);
-
-                    for (int k = 0; k < num_keypoints; k++) {
-                        float px = best_kps[k * 2];
-                        float py = best_kps[k * 2 + 1] - pad;
-                        float rotated_x = (480.f - py) * scaleX;
-                        float rotated_y = px * scaleY;
-                        keypoints.push_back(rotated_x);
-                        keypoints.push_back(rotated_y);
+                    keypoints.reserve(nbKeypoints * 2);
+                    for (int j = 0; j < nbKeypoints; j++) {
+                        // Rotate 90° clockwise and scale to screen resolution
+                        keypoints.push_back((480.f - bestKeypoints[j * 2 + 1] - float(pad)) * scaleX);
+                        keypoints.push_back(bestKeypoints[j * 2] * scaleY);
                     }
                     processed = keypoints;
                 } else {
-                    processed.clear();
+                    processed.clear(); // No detection above threshold
                 }
             } else {
-                processed.clear();
+                processed.clear(); // Skip rows after first (detect only 1 object)
             }
         } else if (params[0] == 3) { // Instance segmentation
+            Mat proto;
+            ex.extract("proto", proto); // Extract prototype masks (32x160x160 tensor, only for seg)
 
+            if (i == 0) { // Only process first row (subsequent rows are empty for seg)
+                float bestConfidence = 0.f;
+                int bestID = -1;
+                // Find detection with highest confidence across all 8400 anchor points
+                for (int col = 0; col < out.w; col++) {
+                    float conf = out.row(4)[col]; // Row 4 contains objectness scores
+                    if (conf > bestConfidence) {
+                        bestConfidence = conf;
+                        bestID = col;
+                    }
+                }
+                if (bestConfidence > 0.5f && bestID >= 0) {
+                    float x = out.row(0)[bestID];
+                    float y = out.row(1)[bestID];
+                    float w = out.row(2)[bestID];
+                    float h = out.row(3)[bestID];
+                    // Generate mask by combining proto and mask coefficients
+                    Mat mask(160, 160, 1);
+                    for (int my = 0; my < 160; my++) {
+                        for (int mx = 0; mx < 160; mx++) {
+                            float val = 0.f;
+                            // Linear combination: sum(coeff[i] * proto[i][y][x]) for all 32 channels
+                            // Rows 5-36 contains the 32 mask coefficients
+                            for (int c = 0; c < 32; c++) {
+                                val += out.row(5 + c)[bestID] * proto.channel(c).row(my)[mx];
+                            }
+                            // Apply sigmoid activation to get probability
+                            mask.row(my)[mx] = 1.f / (1.f + expf(-val));
+                        }
+                    }
+                    // Convert bounding box from 640x640 to 160x160 mask space
+                    // This crops the mask to just the object region to reduce noise
+                    int x1 = max(0, (int) ((x - w / 2.f) * 160.f / 640.f));
+                    int y1 = max(0, (int) ((y - h / 2.f) * 160.f / 640.f));
+                    int x2 = min(160, (int) ((x + w / 2.f) * 160.f / 640.f));
+                    int y2 = min(160, (int) ((y + h / 2.f) * 160.f / 640.f));
+                    // Extract edge/contour points from the mask
+                    vector<pair<float, float>> edgePoints;
+                    float sumX = 0, sumY = 0;
+                    for (int my = y1; my < y2; my++) {
+                        for (int mx = x1; mx < x2; mx++) {
+                            // Pixel is part of object
+                            if (mask.row(my)[mx] > 0.5f) {
+                                // Check if this pixel is on the edge (has a neighbor below threshold)
+                                if (mx == x1 || mx == x2 - 1 || my == y1 || my == y2 - 1 ||
+                                    mask.row(my - 1)[mx] <= 0.5f || mask.row(my + 1)[mx] <= 0.5f ||
+                                    mask.row(my)[mx - 1] <= 0.5f || mask.row(my)[mx + 1] <= 0.5f) {
+                                    edgePoints.emplace_back(mx, my);
+                                    sumX += float(mx);
+                                    sumY += float(my);
+                                }
+                            }
+                        }
+                    }
+                    if (edgePoints.size() >= 18) { // Polygon I annotated is 18 points
+                        // Calculate centroid of all edge points
+                        float centroidX = sumX / float(edgePoints.size());
+                        float centroidY = sumY / float(edgePoints.size());
+                        // Sort edge points by angle from centroid (clockwise)
+                        // This converts random pixel order into a proper contour sequence
+                        sort(edgePoints.begin(), edgePoints.end(),
+                             [centroidX, centroidY](const pair<float, float> &a, const pair<float, float> &b) {
+                                 return atan2(a.second - centroidY, a.first - centroidX) <
+                                        atan2(b.second - centroidY, b.first - centroidX);
+                             });
+                        // Subsample to exactly 18 points by dividing 360° into 18 sectors
+                        vector<float> polygon;
+                        for (int j = 0; j < 18; j++) {
+                            // Calculate target angle for this sector (-π to +π)
+                            float targetAngle = -M_PI + (float(j) * 2.f * M_PI / 18.f);
+                            // Find edge point closest to target angle
+                            int bestPoint = 0;
+                            float minDiff = 999.f;
+                            for (int k = 0; k < edgePoints.size(); k++) {
+                                float angle = atan2(edgePoints[k].second - centroidY,
+                                                    edgePoints[k].first - centroidX);
+                                float diff = abs(angle - targetAngle);
+                                if (diff < minDiff) {
+                                    minDiff = diff;
+                                    bestPoint = k;
+                                }
+                            }
+                            // Scale from 160x160 mask to 640x640 image space (*4)
+                            float px = edgePoints[bestPoint].first * 4.f;
+                            float py = edgePoints[bestPoint].second * 4.f - float(pad);
+                            // Remove letterbox padding (subtract pad from y)
+                            // Rotate 90° and scale to screen coordinates
+                            polygon.push_back((480.f - py) * scaleX);
+                            polygon.push_back(px * scaleY);
+                        }
+                        processed = polygon;
+                    } else {
+                        processed.clear(); // Not enough points for valid polygon
+                    }
+                } else {
+                    processed.clear(); // No confident detection
+                }
+            } else {
+                processed.clear(); // Skip rows after first (detect only 1 object)
+            }
         }
         jfloatArray rowArray = env->NewFloatArray((jsize) processed.size());
         if (!processed.empty()) {

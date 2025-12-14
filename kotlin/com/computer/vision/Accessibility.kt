@@ -7,13 +7,13 @@ import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Build
 import android.util.DisplayMetrics
-import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -62,9 +62,9 @@ class Accessibility : AccessibilityService() {
             2 to "dirt",
             3 to "enderman"
         )
-        private val keypointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = Color.RED
+            color = Color.argb(128, 255, 0, 0)
         }
         private val keypointRadius = 8f
 
@@ -117,9 +117,18 @@ class Accessibility : AccessibilityService() {
                                 detection[i],
                                 detection[i + 1],
                                 keypointRadius,
-                                keypointPaint
+                                fillPaint
                             )
                         }
+                    } else if (app.currentID == 3 && detection.size == 36) {
+                        //sword shape is 18 x,y points so 36
+                        val path = Path()
+                        path.moveTo(detection[0], detection[1])
+                        for (i in 2 until detection.size step 2) {
+                            path.lineTo(detection[i], detection[i + 1])
+                        }
+                        path.close()
+                        canvas.drawPath(path, fillPaint)
                     }
                 }
             }
